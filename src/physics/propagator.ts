@@ -211,6 +211,42 @@ export function propagateToScenePosition(
 }
 
 /**
+ * Propagates a satellite to both its Three.js scene position and its prograde
+ * velocity direction vector in the ECF scene frame (used to orient 3D station models).
+ */
+export function propagateToScenePosAndVel(
+  satrec: SatRec,
+  date: Date,
+  gmst: GMSTime,
+): { readonly pos: SceneVec3; readonly vel: SceneVec3 } | null {
+  const result = propagate(satrec, date);
+  if (
+    !result ||
+    !result.position ||
+    !result.velocity ||
+    !isFiniteVec3(result.position) ||
+    !isFiniteVec3(result.velocity)
+  ) {
+    return null;
+  }
+
+  const posEcf = eciToEcf(result.position, gmst);
+  const velEcf = eciToEcf(result.velocity, gmst);
+  if (!isFiniteVec3(posEcf) || !isFiniteVec3(velEcf)) {
+    return null;
+  }
+
+  return {
+    pos: ecfKmToScene(posEcf),
+    vel: {
+      x: velEcf.x,
+      y: velEcf.z,
+      z: -velEcf.y,
+    },
+  };
+}
+
+/**
  * Computes full orbital telemetry (ECI, ECF, geodetic lat/lon/alt, speed, and scene position)
  * for a single satellite at the given UTC Date.
  */

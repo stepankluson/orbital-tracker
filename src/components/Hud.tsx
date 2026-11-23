@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronUp,
   Clock,
+  Cloud,
+  Copy,
   Crosshair,
   Eye,
   FastForward,
@@ -44,6 +47,7 @@ import type {
   SatelliteRecord,
   SatelliteTelemetry,
 } from '../physics/propagator';
+import { SkyPlot } from './SkyPlot';
 
 export const SPEED_MULTIPLIERS = [1, 10, 100, 500] as const;
 export type SpeedMultiplier = (typeof SPEED_MULTIPLIERS)[number];
@@ -79,6 +83,8 @@ interface HudProps {
   readonly loadingGroups: ReadonlySet<SatelliteGroupId>;
   readonly groupCounts: Readonly<Partial<Record<SatelliteGroupId, number>>>;
   readonly onToggleGroup: (groupId: SatelliteGroupId) => void;
+  readonly showClouds: boolean;
+  readonly onToggleClouds: () => void;
   readonly conjunctionEvents: readonly ConjunctionEvent[];
   readonly activeConjunction: ConjunctionEvent | null;
   readonly conjunctionScanning: boolean;
@@ -89,6 +95,7 @@ interface HudProps {
   readonly onScanConjunctions: () => void;
   readonly onSelectConjunction: (event: ConjunctionEvent) => void;
   readonly onClearConjunction: () => void;
+  readonly selectedSatellite: SatelliteRecord | null;
   readonly selectedTelemetry: SatelliteTelemetry | null;
   readonly selectedSunlit: boolean | null;
   readonly isCameraLocked: boolean;
@@ -171,6 +178,8 @@ export function Hud({
   loadingGroups,
   groupCounts,
   onToggleGroup,
+  showClouds,
+  onToggleClouds,
   conjunctionEvents,
   activeConjunction,
   conjunctionScanning,
@@ -181,6 +190,7 @@ export function Hud({
   onScanConjunctions,
   onSelectConjunction,
   onClearConjunction,
+  selectedSatellite,
   selectedTelemetry,
   selectedSunlit,
   isCameraLocked,
@@ -209,6 +219,31 @@ export function Hud({
   const [layersOpen, setLayersOpen] = useState(false);
   const [radarOpen, setRadarOpen] = useState(false);
   const [observerOpen, setObserverOpen] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  const handleShareView = (): void => {
+    const url = window.location.href;
+    const markCopied = (): void => {
+      setCopiedUrl(true);
+      window.setTimeout(() => setCopiedUrl(false), 2000);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      void navigator.clipboard.writeText(url).then(markCopied, () => {
+        markCopied();
+      });
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = url;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      markCopied();
+    }
+  };
   const [latInput, setLatInput] = useState(
     observer ? observer.lat.toFixed(4) : '49.1951',
   );
@@ -472,6 +507,42 @@ export function Hud({
                     </button>
                   );
                 })}
+
+                {/* Real-time EUMETSAT Global Cloud Layer Toggle */}
+                <div className="mt-1 border-t border-white/10 pt-1">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={showClouds}
+                    onClick={onToggleClouds}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-white/5"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Cloud className="h-3.5 w-3.5 shrink-0 text-sky-300" />
+                      <span
+                        className={`truncate text-xs ${
+                          showClouds
+                            ? 'font-medium text-slate-100'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        Live Clouds
+                      </span>
+                    </div>
+
+                    <span
+                      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+                        showClouds ? 'bg-sky-500/80' : 'bg-white/15'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                          showClouds ? 'translate-x-3.5' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -626,71 +697,97 @@ export function Hud({
           )}
         </div>
 
-        {/* Top-Right Stack: Quick Search + Collapsible Ground Observer Panel */}
+        {/* Top-Right Stack: Quick Search + Share View + Collapsible Ground Observer Panel */}
         <div className="pointer-events-auto flex w-full flex-col gap-2 sm:w-80">
-          {/* Quick Search */}
-          <div className="relative">
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/75 px-3 py-2 shadow-lg backdrop-blur-md focus-within:border-sky-400/50">
-              <Search className="h-4 w-4 shrink-0 text-slate-400" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() =>
-                  window.setTimeout(() => setSearchFocused(false), 150)
-                }
-                onKeyDown={handleKeyDown}
-                placeholder="Search satellite or NORAD ID (e.g. ISS)…"
-                className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 outline-none"
-                aria-label="Search satellites"
-              />
-              {query && (
-                <button
-                  type="button"
-                  onClick={() => setQuery('')}
-                  className="text-slate-400 transition hover:text-slate-200"
-                  aria-label="Clear search"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+          {/* Quick Search + Share View row */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/75 px-3 py-2 shadow-lg backdrop-blur-md focus-within:border-sky-400/50">
+                <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() =>
+                    window.setTimeout(() => setSearchFocused(false), 150)
+                  }
+                  onKeyDown={handleKeyDown}
+                  placeholder="Search satellite or ID…"
+                  className="w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 outline-none"
+                  aria-label="Search satellites"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    className="text-slate-400 transition hover:text-slate-200"
+                    aria-label="Clear search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {searchFocused && (
+                <div className="absolute right-0 left-0 z-30 mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/95 p-1 shadow-2xl backdrop-blur-md">
+                  {filteredSatellites.length === 0 ? (
+                    <div className="px-3 py-2.5 text-center text-xs text-slate-500">
+                      No matching satellites
+                    </div>
+                  ) : (
+                    filteredSatellites.map((sat) => (
+                      <button
+                        key={sat.id}
+                        type="button"
+                        onMouseDown={() => handleSearchSelect(sat)}
+                        className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-white/10"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{
+                              backgroundColor:
+                                CATEGORY_COLOR_HEX[sat.category] ?? '#38bdf8',
+                            }}
+                          />
+                          <span className="truncate font-medium text-slate-100">
+                            {sat.name}
+                          </span>
+                        </div>
+                        <span className="ml-2 shrink-0 font-mono text-[10px] text-slate-400">
+                          #{sat.id}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
               )}
             </div>
 
-            {searchFocused && (
-              <div className="absolute right-0 left-0 z-30 mt-1.5 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/95 p-1 shadow-2xl backdrop-blur-md">
-                {filteredSatellites.length === 0 ? (
-                  <div className="px-3 py-2.5 text-center text-xs text-slate-500">
-                    No matching satellites
-                  </div>
-                ) : (
-                  filteredSatellites.map((sat) => (
-                    <button
-                      key={sat.id}
-                      type="button"
-                      onMouseDown={() => handleSearchSelect(sat)}
-                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-white/10"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor:
-                              CATEGORY_COLOR_HEX[sat.category] ?? '#38bdf8',
-                          }}
-                        />
-                        <span className="truncate font-medium text-slate-100">
-                          {sat.name}
-                        </span>
-                      </div>
-                      <span className="ml-2 shrink-0 font-mono text-[10px] text-slate-400">
-                        #{sat.id}
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
+            {/* Share View button */}
+            <button
+              type="button"
+              onClick={handleShareView}
+              title="Copy shareable link to current view"
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs font-medium shadow-lg backdrop-blur-md transition ${
+                copiedUrl
+                  ? 'border-emerald-400/40 bg-emerald-950/80 text-emerald-300'
+                  : 'border-white/10 bg-slate-950/75 text-slate-200 hover:border-sky-400/40 hover:bg-slate-900/90'
+              }`}
+            >
+              {copiedUrl ? (
+                <>
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5 text-sky-400" />
+                  <span>Share</span>
+                </>
+              )}
+            </button>
           </div>
 
           {/* Collapsible Ground Observer & Pass Predictor Panel */}
@@ -802,8 +899,8 @@ export function Hud({
                   <p className="text-[11px] text-amber-300">{geoError}</p>
                 )}
 
-                {/* Live Look Angles & Pass Predictor */}
-                {observer && selectedTelemetry ? (
+                {/* Live Look Angles, Polar Sky Plot & Pass Predictor */}
+                {observer && selectedTelemetry && selectedSatellite ? (
                   <div className="space-y-2.5 border-t border-white/10 pt-2.5">
                     {lookAngles && (
                       <div>
@@ -868,6 +965,14 @@ export function Hud({
                         </div>
                       </div>
                     )}
+
+                    {/* Polar Sky Plot (Observer Radar) */}
+                    <SkyPlot
+                      satellite={selectedSatellite}
+                      observer={observer}
+                      lookAngles={lookAngles}
+                      nextPass={passes[0] ?? null}
+                    />
 
                     {/* Next 5 Passes */}
                     <div>

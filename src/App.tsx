@@ -9,6 +9,7 @@ import { ObserverPin } from './components/ObserverPin';
 import { OrbitLine } from './components/OrbitLine';
 import { SatelliteFootprint } from './components/SatelliteFootprint';
 import { SatelliteSwarm } from './components/SatelliteSwarm';
+import { StationModels } from './components/StationModels';
 import {
   loadSatelliteGroup,
   mergeActiveGroups,
@@ -236,15 +237,90 @@ const DEFAULT_ENABLED_GROUPS: readonly SatelliteGroupId[] = SATELLITE_GROUPS.fil
   (g) => g.defaultEnabled,
 ).map((g) => g.id);
 
+const VALID_GROUP_IDS = new Set<string>(SATELLITE_GROUPS.map((g) => g.id));
+
+interface InitialUrlState {
+  readonly layers: SatelliteGroupId[];
+  readonly satId: number | null;
+  readonly lock: boolean;
+  readonly observer: ObserverLocation | null;
+}
+
+function parseInitialUrlState(): InitialUrlState {
+  try {
+    const params = new URLSearchParams(window.location.search);
+
+    // Parse layers
+    const rawLayers = params.get('layers');
+    const parsedLayers: SatelliteGroupId[] = [];
+    if (rawLayers) {
+      for (const token of rawLayers.split(',')) {
+        const trimmed = token.trim();
+        if (VALID_GROUP_IDS.has(trimmed)) {
+          parsedLayers.push(trimmed as SatelliteGroupId);
+        }
+      }
+    }
+    const layers =
+      parsedLayers.length > 0 ? parsedLayers : [...DEFAULT_ENABLED_GROUPS];
+
+    // Parse selected satellite NORAD ID
+    const rawSat = params.get('sat');
+    const parsedSat = rawSat ? Number.parseInt(rawSat, 10) : NaN;
+    const satId =
+      Number.isFinite(parsedSat) && parsedSat > 0 ? parsedSat : null;
+
+    // Parse Camera Lock flag
+    const lock = params.get('lock') === '1' && satId !== null;
+
+    // Parse observer coordinates (lat,lon)
+    let observer: ObserverLocation | null = null;
+    const rawObs = params.get('obs');
+    if (rawObs) {
+      const parts = rawObs.split(',');
+      if (parts.length === 2) {
+        const lat = Number.parseFloat(parts[0]);
+        const lon = Number.parseFloat(parts[1]);
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lon >= -180 &&
+          lon <= 180
+        ) {
+          observer = {
+            name: 'Shared',
+            lat,
+            lon,
+            altKm: 0.1,
+          };
+        }
+      }
+    }
+
+    return { layers, satId, lock, observer };
+  } catch {
+    return {
+      layers: [...DEFAULT_ENABLED_GROUPS],
+      satId: null,
+      lock: false,
+      observer: null,
+    };
+  }
+}
+
 export function App() {
+  const initialUrlState = useMemo(() => parseInitialUrlState(), []);
+
   const [enabledGroups, setEnabledGroups] = useState<Set<SatelliteGroupId>>(
-    () => new Set(DEFAULT_ENABLED_GROUPS),
+    () => new Set(initialUrlState.layers),
   );
   const [loadedByGroup, setLoadedByGroup] = useState<
     Partial<Record<SatelliteGroupId, SatelliteRecord[]>>
   >({});
   const [loadingGroups, setLoadingGroups] = useState<Set<SatelliteGroupId>>(
-    () => new Set(DEFAULT_ENABLED_GROUPS),
+    () => new Set(initialUrlState.layers),
   );
   const [isLoading, setIsLoading] = useState(true);
   const [dataSource, setDataSource] = useState<DataSourceKind | null>(null);
@@ -252,9 +328,17 @@ export function App() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isCameraLocked, setIsCameraLocked] = useState(false);
-  const [observer, setObserver] = useState<ObserverLocation | null>(null);
+  const [showClouds, setShowClouds] = useState(true);
+  const [observer, setObserver] = useState<ObserverLocation | null>(
+    () => initialUrlState.observer,
+  );
   const [isPlaying, setIsPlaying] = useState(true);
   const [speed, setSpeed] = useState<SpeedMultiplier>(1);
+
+  const pendingUrlTargetRef = useRef<{ satId: number | null; lock: boolean }>({
+    satId: initialUrlState.satId,
+    lock: initialUrlState.lock,
+  });
 
   // Conjunction Radar state
   const [conjunctionEvents, setConjunctionEvents] = useState<
@@ -320,11 +404,11 @@ export function App() {
     }
   }, []);
 
-  // Load default-enabled groups on initial mount
+  // Load initial enabled groups (defaults or restored from URL ?layers=...)
   useEffect(() => {
     let active = true;
     void Promise.all(
-      DEFAULT_ENABLED_GROUPS.map((groupId) => fetchAndStoreGroup(groupId)),
+      initialUrlState.layers.map((groupId) => fetchAndStoreGroup(groupId)),
     ).then(() => {
       if (active) {
         setIsLoading(false);
@@ -333,7 +417,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [fetchAndStoreGroup]);
+  }, [fetchAndStoreGroup, initialUrlState.layers]);
 
   const satellites = useMemo(
     () => mergeActiveGroups(enabledGroups, loadedByGroup),
@@ -396,6 +480,70 @@ export function App() {
       setIsCameraLocked(false);
     }
   }, [satellites, selectedId]);
+
+  // Restore ?sat= and ?lock=1 from URL once satellite data has loaded
+  useEffect(() => {
+    const pending = pendingUrlTargetRef.current;
+    if (pending.satId === null) {
+      return;
+    }
+    const found = satellites.find((sat) => sat.id === pending.satId);
+    if (found) {
+      setSelectedId(found.id);
+      setOrbitRefTimeMs(simTimeRef.current);
+      setPassesAnchorMs(simTimeRef.current);
+      if (pending.lock) {
+        setIsCameraLocked(true);
+      } else {
+        const telemetry = propagateTelemetry(
+          found,
+          new Date(simTimeRef.current),
+        );
+        if (telemetry) {
+          focusTargetRef.current = telemetry.positionScene;
+        }
+      }
+      pendingUrlTargetRef.current = { satId: null, lock: false };
+    } else if (!isLoading) {
+      pendingUrlTargetRef.current = { satId: null, lock: false };
+    }
+  }, [satellites, isLoading]);
+
+  // Sync active app state to URL query parameters without reloading
+  useEffect(() => {
+    if (pendingUrlTargetRef.current.satId !== null) {
+      return;
+    }
+
+    const params = new URLSearchParams();
+
+    const orderedActiveLayers = SATELLITE_GROUPS.filter((g) =>
+      enabledGroups.has(g.id),
+    ).map((g) => g.id);
+    if (orderedActiveLayers.length > 0) {
+      params.set('layers', orderedActiveLayers.join(','));
+    }
+
+    if (selectedId !== null) {
+      params.set('sat', String(selectedId));
+      if (isCameraLocked) {
+        params.set('lock', '1');
+      }
+    }
+
+    if (observer) {
+      params.set(
+        'obs',
+        `${observer.lat.toFixed(4)},${observer.lon.toFixed(4)}`,
+      );
+    }
+
+    const queryString = params.toString();
+    const nextUrl = queryString
+      ? `${window.location.pathname}?${queryString}`
+      : window.location.pathname;
+    window.history.replaceState(null, '', nextUrl);
+  }, [enabledGroups, selectedId, isCameraLocked, observer]);
 
   // Terminate conjunction worker on unmount
   useEffect(() => {
@@ -704,7 +852,7 @@ export function App() {
           focusTargetRef={focusTargetRef}
         />
 
-        <Earth sunDirRef={sunDirRef} />
+        <Earth sunDirRef={sunDirRef} showClouds={showClouds} />
 
         <SatelliteSwarm
           satellites={satellites}
@@ -712,6 +860,13 @@ export function App() {
           activeConjunction={activeConjunction}
           simTimeRef={simTimeRef}
           sunDirRef={sunDirRef}
+          onSelect={(id) => handleSelectSatellite(id, false)}
+        />
+
+        <StationModels
+          satellites={satellites}
+          selectedId={selectedId}
+          simTimeRef={simTimeRef}
           onSelect={(id) => handleSelectSatellite(id, false)}
         />
 
@@ -758,6 +913,8 @@ export function App() {
         loadingGroups={loadingGroups}
         groupCounts={groupCounts}
         onToggleGroup={handleToggleGroup}
+        showClouds={showClouds}
+        onToggleClouds={() => setShowClouds((prev) => !prev)}
         conjunctionEvents={conjunctionEvents}
         activeConjunction={activeConjunction}
         conjunctionScanning={conjunctionScanning}
@@ -768,6 +925,7 @@ export function App() {
         onScanConjunctions={handleScanConjunctions}
         onSelectConjunction={handleSelectConjunction}
         onClearConjunction={handleClearConjunction}
+        selectedSatellite={selectedSatellite}
         selectedTelemetry={selectedTelemetry}
         selectedSunlit={selectedSunlit}
         isCameraLocked={isCameraLocked}

@@ -37,6 +37,12 @@ export interface SatellitePass {
   readonly visibility: PassVisibility;
 }
 
+export interface SkyTrackPoint {
+  readonly elevationDeg: number;
+  readonly azimuthDeg: number;
+  readonly timeMs: number;
+}
+
 const COARSE_STEP_MS = 30_000; // 30 seconds
 const FINE_STEP_MS = 5_000; // 5 seconds
 const MIN_PASS_ELEVATION_DEG = 10;
@@ -308,4 +314,46 @@ export function predictPasses(
   }
 
   return passes;
+}
+
+/**
+ * Samples the sky-dome trajectory (elevation & azimuth) of an upcoming pass
+ * from horizon rise through peak elevation to horizon set for plotting on a polar sky radar.
+ */
+export function samplePassSkyTrack(
+  satrec: SatRec,
+  observer: ObserverLocation,
+  pass: SatellitePass,
+  samples = 48,
+): {
+  readonly points: SkyTrackPoint[];
+  readonly peak: SkyTrackPoint | null;
+} {
+  const observerGd = toGeodeticObserver(observer);
+  // Pad ±2.5 minutes around the 10° AOS/LOS window to capture the full 0° horizon arc
+  const padMs = 150_000;
+  const startMs = pass.aosTime.getTime() - padMs;
+  const endMs = pass.losTime.getTime() + padMs;
+  const spanMs = Math.max(1, endMs - startMs);
+
+  const points: SkyTrackPoint[] = [];
+  let peak: SkyTrackPoint | null = null;
+
+  for (let i = 0; i <= samples; i++) {
+    const timeMs = startMs + (i / samples) * spanMs;
+    const sample = sampleElevationAndAzimuth(satrec, observerGd, timeMs);
+    if (sample && sample.elevationDeg >= 0) {
+      const pt: SkyTrackPoint = {
+        elevationDeg: sample.elevationDeg,
+        azimuthDeg: sample.azimuthDeg,
+        timeMs,
+      };
+      points.push(pt);
+      if (!peak || pt.elevationDeg > peak.elevationDeg) {
+        peak = pt;
+      }
+    }
+  }
+
+  return { points, peak };
 }

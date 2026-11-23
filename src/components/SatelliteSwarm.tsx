@@ -3,6 +3,7 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
 import { SATELLITE_GROUPS } from '../data/celestrak';
 import type { ConjunctionEvent } from '../physics/conjunctionTypes';
+import { ISS_NORAD_ID, TIANGONG_NORAD_ID } from './StationModels';
 import {
   computeGmst,
   EARTH_RADIUS_KM,
@@ -192,6 +193,8 @@ export function SatelliteSwarm({
 
       const isSelected = sat.id === selectedId;
       const isHovered = sat.id === hoveredId;
+      const has3dModel =
+        sat.id === ISS_NORAD_ID || sat.id === TIANGONG_NORAD_ID;
 
       const distToCam = Math.hypot(pos.x - camX, pos.y - camY, pos.z - camZ);
       const baseScreenRadius = THREE.MathUtils.clamp(
@@ -208,11 +211,9 @@ export function SatelliteSwarm({
       dummy.position.set(pos.x, pos.y, pos.z);
 
       if (isSelected && !conjunctionActive) {
-        const selectedRadius = THREE.MathUtils.clamp(
-          distToCam * 0.0085,
-          0.0009,
-          0.024,
-        );
+        const selectedRadius = has3dModel
+          ? 0
+          : THREE.MathUtils.clamp(distToCam * 0.0085, 0.0009, 0.024);
         dummy.scale.setScalar(selectedRadius);
         scratchColor.copy(COLOR_SELECTED);
 
@@ -221,13 +222,16 @@ export function SatelliteSwarm({
           reticleRef.current.visible = true;
           const pulse = 1 + 0.22 * Math.sin(elapsedSec * 4.5);
           const reticleRadius = THREE.MathUtils.clamp(
-            distToCam * 0.017,
-            0.0022,
-            0.045,
+            distToCam * (has3dModel ? 0.026 : 0.017),
+            0.003,
+            0.055,
           );
           reticleRef.current.scale.setScalar(reticleRadius * pulse);
           reticleRef.current.lookAt(camera.position);
         }
+      } else if (has3dModel) {
+        // Rendered by dedicated procedural 3D model in StationModels.tsx
+        dummy.scale.setScalar(0);
       } else if (isHovered && !conjunctionActive) {
         const hoveredRadius = THREE.MathUtils.clamp(
           distToCam * 0.007,

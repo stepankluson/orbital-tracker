@@ -10,9 +10,12 @@ const EARTH_SPECULAR_URL =
   'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r170/examples/textures/planets/earth_specular_2048.jpg';
 const EARTH_NIGHT_URL =
   'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg';
+const EARTH_CLOUDS_URL =
+  'https://clouds.matteason.co.uk/images/2048x1024/clouds-alpha.png';
 
 interface EarthProps {
   readonly sunDirRef: React.MutableRefObject<SceneVec3>;
+  readonly showClouds: boolean;
 }
 
 /**
@@ -234,13 +237,58 @@ const ATMOSPHERE_FRAGMENT_SHADER = `
   }
 `;
 
+const CLOUD_VERTEX_SHADER = `
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+
+  void main() {
+    vUv = uv;
+    vWorldNormal = normalize(mat3(modelMatrix) * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const CLOUD_FRAGMENT_SHADER = `
+  uniform sampler2D uCloudMap;
+  uniform vec3 uSunDirection;
+
+  varying vec2 vUv;
+  varying vec3 vWorldNormal;
+
+  void main() {
+    vec4 cloudSample = texture2D(uCloudMap, vUv);
+    float coverage = cloudSample.a;
+    if (coverage < 0.01) {
+      discard;
+    }
+
+    vec3 N = normalize(vWorldNormal);
+    vec3 L = normalize(uSunDirection);
+    float ndotl = dot(N, L);
+
+    float dayFactor = smoothstep(-0.16, 0.22, ndotl);
+    float diffuse = max(ndotl, 0.0);
+
+    vec3 dayCloud = vec3(0.95, 0.97, 1.0) * (0.24 + 0.82 * diffuse);
+    vec3 nightCloud = vec3(0.05, 0.08, 0.14);
+
+    float twilightBand = exp(-pow((ndotl + 0.02) / 0.09, 2.0));
+    vec3 twilightTint = vec3(0.92, 0.52, 0.30) * twilightBand * 0.22;
+
+    vec3 color = mix(nightCloud, dayCloud, dayFactor) + twilightTint;
+    float alpha = coverage * mix(0.32, 0.88, dayFactor);
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
 interface LoadedEarthMaps {
   readonly dayMap: THREE.Texture | null;
   readonly nightMap: THREE.Texture | null;
   readonly specularMap: THREE.Texture | null;
+  readonly cloudMap: THREE.Texture | null;
 }
 
-export function Earth({ sunDirRef }: EarthProps) {
+export function Earth({ sunDirRef, showClouds }: EarthProps) {
   const proceduralTexture = useMemo(() => createProceduralEarthTexture(), []);
   const fallbackBlackTexture = useMemo(() => createFallbackBlackTexture(), []);
 
@@ -248,6 +296,7 @@ export function Earth({ sunDirRef }: EarthProps) {
     dayMap: null,
     nightMap: null,
     specularMap: null,
+    cloudMap: null,
   });
 
   useEffect(() => {
@@ -279,14 +328,16 @@ export function Earth({ sunDirRef }: EarthProps) {
       loadOptional(EARTH_DAY_URL),
       loadOptional(EARTH_NIGHT_URL),
       loadOptional(EARTH_SPECULAR_URL),
-    ]).then(([dayMap, nightMap, specularMap]) => {
+      loadOptional(EARTH_CLOUDS_URL),
+    ]).then(([dayMap, nightMap, specularMap, cloudMap]) => {
       if (!active) {
         dayMap?.dispose();
         nightMap?.dispose();
         specularMap?.dispose();
+        cloudMap?.dispose();
         return;
       }
-      setMaps({ dayMap, nightMap, specularMap });
+      setMaps({ dayMap, nightMap, specularMap, cloudMap });
     });
 
     return () => {
@@ -299,6 +350,7 @@ export function Earth({ sunDirRef }: EarthProps) {
       maps.dayMap?.dispose();
       maps.nightMap?.dispose();
       maps.specularMap?.dispose();
+      maps.cloudMap?.dispose();
     };
   }, [maps]);
 
@@ -335,6 +387,21 @@ export function Earth({ sunDirRef }: EarthProps) {
     [],
   );
 
+  const cloudMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uCloudMap: { value: fallbackBlackTexture },
+          uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
+        },
+        vertexShader: CLOUD_VERTEX_SHADER,
+        fragmentShader: CLOUD_FRAGMENT_SHADER,
+        transparent: true,
+        depthWrite: false,
+      }),
+    [fallbackBlackTexture],
+  );
+
   useEffect(() => {
     earthMaterial.uniforms['uDayMap'].value = maps.dayMap ?? proceduralTexture;
     earthMaterial.uniforms['uNightMap'].value =
@@ -345,14 +412,17 @@ export function Earth({ sunDirRef }: EarthProps) {
     earthMaterial.uniforms['uHasSpecularMap'].value = maps.specularMap
       ? 1.0
       : 0.0;
-  }, [maps, earthMaterial, proceduralTexture, fallbackBlackTexture]);
+    cloudMaterial.uniforms['uCloudMap'].value =
+      maps.cloudMap ?? fallbackBlackTexture;
+  }, [maps, earthMaterial, cloudMaterial, proceduralTexture, fallbackBlackTexture]);
 
   useEffect(() => {
     return () => {
       earthMaterial.dispose();
       atmosphereMaterial.dispose();
+      cloudMaterial.dispose();
     };
-  }, [earthMaterial, atmosphereMaterial]);
+  }, [earthMaterial, atmosphereMaterial, cloudMaterial]);
 
   useFrame(() => {
     const sun = sunDirRef.current;
@@ -362,6 +432,11 @@ export function Earth({ sunDirRef }: EarthProps) {
       sun.z,
     );
     (atmosphereMaterial.uniforms['uSunDirection'].value as THREE.Vector3).set(
+      sun.x,
+      sun.y,
+      sun.z,
+    );
+    (cloudMaterial.uniforms['uSunDirection'].value as THREE.Vector3).set(
       sun.x,
       sun.y,
       sun.z,
@@ -381,10 +456,18 @@ export function Earth({ sunDirRef }: EarthProps) {
         speed={0.35}
       />
 
-      {/* Earth globe (radius = 1 scene unit = 6378.137 km) with real-time solar terminator */}
-      <mesh name="earth-globe" material={earthMaterial}>
-        <sphereGeometry args={[1, 64, 64]} />
-      </mesh>
+      {/* Earth globe + live EUMETSAT cloud layer sharing the same ECF frame */}
+      <group name="earth-system">
+        <mesh name="earth-globe" material={earthMaterial}>
+          <sphereGeometry args={[1, 64, 64]} />
+        </mesh>
+
+        {showClouds && maps.cloudMap && (
+          <mesh name="earth-clouds" material={cloudMaterial}>
+            <sphereGeometry args={[1.008, 64, 64]} />
+          </mesh>
+        )}
+      </group>
 
       {/* Sun-aligned atmospheric Fresnel limb glow */}
       <mesh name="earth-atmosphere" material={atmosphereMaterial}>
