@@ -670,7 +670,7 @@ export function App() {
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-slate-950">
       <Canvas
-        camera={{ position: [0, 1.1, 3.1], fov: 42, near: 0.02, far: 250 }}
+        camera={{ position: [0, 1.1, 3.1], fov: 42, near: 0.02, far: 1000 }}
         dpr={[1, 2]}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
       >
@@ -745,7 +745,7 @@ export function App() {
           enableDamping
           dampingFactor={0.07}
           minDistance={isCameraLocked || activeConjunction ? 0.06 : 1.35}
-          maxDistance={8.5}
+          maxDistance={36}
           rotateSpeed={0.55}
           zoomSpeed={0.8}
           onStart={handleCancelFocus}

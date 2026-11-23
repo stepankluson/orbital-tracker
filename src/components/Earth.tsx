@@ -372,10 +372,10 @@ export function Earth({ sunDirRef }: EarthProps) {
     <group>
       {/* Deep space starfield */}
       <Stars
-        radius={85}
-        depth={55}
+        radius={180}
+        depth={120}
         count={4200}
-        factor={3.2}
+        factor={3.6}
         saturation={0.15}
         fade
         speed={0.35}
