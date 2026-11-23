@@ -1,0 +1,66 @@
+name: Update Starlink GP Snapshot
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-starlink:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download and validate Starlink GP JSON
+        run: |
+          mkdir -p public/data
+          TMP_FILE="$(mktemp)"
+
+          download_and_validate() {
+            local url="$1"
+            echo "Fetching $url ..."
+            if ! curl -fsSL -A "Mozilla/5.0" "$url" -o "$TMP_FILE"; then
+              return 1
+            fi
+            # Must start with '[' and parse as a non-empty JSON array of STARLINK records
+            if ! head -c 1 "$TMP_FILE" | grep -q '^\['; then
+              return 1
+            fi
+            node -e '
+              const fs = require("fs");
+              const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+              if (!Array.isArray(data) || data.length === 0 || !data[0].OBJECT_NAME) {
+                process.exit(1);
+              }
+              console.log(`Validated ${data.length} Starlink GP records.`);
+            ' "$TMP_FILE"
+          }
+
+          if download_and_validate "https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=json" || \
+             download_and_validate "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json"; then
+            mv "$TMP_FILE" public/data/starlink.json
+          else
+            rm -f "$TMP_FILE"
+            echo "::error::Failed to download a valid Starlink GP JSON snapshot."
+            exit 1
+          fi
+
+      - name: Commit and push updated snapshot
+        run: |
+          if git diff --quiet -- public/data/starlink.json && [ -z "$(git status --porcelain -- public/data/starlink.json)" ]; then
+            echo "No changes to public/data/starlink.json; skipping commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/starlink.json
+          git commit -m "chore(data): update Starlink GP snapshot ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          git push origin HEAD:main

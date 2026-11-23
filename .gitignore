@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Environment variables
+.env
+.env.*
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+*.log
+*.local
+
+# Ensure Starlink snapshot stays tracked
+!public/data/starlink.json
