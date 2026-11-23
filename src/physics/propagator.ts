@@ -33,7 +33,8 @@ export type SatelliteGroupId =
   | 'visual'
   | 'starlink'
   | 'gnss'
-  | 'weather';
+  | 'weather'
+  | 'active';
 
 export type SatelliteCategory = SatelliteGroupId | 'fallback';
 

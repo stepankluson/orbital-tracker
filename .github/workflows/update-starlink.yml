@@ -1,4 +1,4 @@
-name: Update Starlink GP Snapshot
+name: Update Satellite GP Snapshots
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  update-starlink:
+  update-snapshots:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,49 +18,60 @@ jobs:
         with:
           ref: main
 
-      - name: Download and validate Starlink GP JSON
+      - name: Download and validate Starlink & Active GP JSON snapshots
         run: |
           mkdir -p public/data
-          TMP_FILE="$(mktemp)"
 
           download_and_validate() {
             local url="$1"
-            echo "Fetching $url ..."
-            if ! curl -fsSL -A "Mozilla/5.0" "$url" -o "$TMP_FILE"; then
+            local out_path="$2"
+            local tmp_file
+            tmp_file="$(mktemp)"
+
+            echo "Fetching $url -> $out_path ..."
+            if ! curl -fsSL -A "Mozilla/5.0" "$url" -o "$tmp_file"; then
+              rm -f "$tmp_file"
               return 1
             fi
-            # Must start with '[' and parse as a non-empty JSON array of STARLINK records
-            if ! head -c 1 "$TMP_FILE" | grep -q '^\['; then
+            if ! head -c 1 "$tmp_file" | grep -q '^\['; then
+              rm -f "$tmp_file"
               return 1
             fi
-            node -e '
+            if ! node -e '
               const fs = require("fs");
               const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
               if (!Array.isArray(data) || data.length === 0 || !data[0].OBJECT_NAME) {
                 process.exit(1);
               }
-              console.log(`Validated ${data.length} Starlink GP records.`);
-            ' "$TMP_FILE"
+              console.log(`Validated ${data.length} GP records for ${process.argv[2]}.`);
+            ' "$tmp_file" "$out_path"; then
+              rm -f "$tmp_file"
+              return 1
+            fi
+
+            mv "$tmp_file" "$out_path"
+            return 0
           }
 
-          if download_and_validate "https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=json" || \
-             download_and_validate "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json"; then
-            mv "$TMP_FILE" public/data/starlink.json
-          else
-            rm -f "$TMP_FILE"
-            echo "::error::Failed to download a valid Starlink GP JSON snapshot."
-            exit 1
+          if ! (download_and_validate "https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=json" "public/data/starlink.json" || \
+                download_and_validate "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json" "public/data/starlink.json"); then
+            echo "::warning::Skipping starlink.json update (download or validation failed)."
           fi
 
-      - name: Commit and push updated snapshot
+          if ! download_and_validate "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json" "public/data/active.json"; then
+            echo "::warning::Skipping active.json update (download or validation failed)."
+          fi
+
+      - name: Commit and push updated snapshots
         run: |
-          if git diff --quiet -- public/data/starlink.json && [ -z "$(git status --porcelain -- public/data/starlink.json)" ]; then
-            echo "No changes to public/data/starlink.json; skipping commit."
+          if git diff --quiet -- public/data/starlink.json public/data/active.json && \
+             [ -z "$(git status --porcelain -- public/data/starlink.json public/data/active.json)" ]; then
+            echo "No changes to GP snapshots; skipping commit."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/data/starlink.json
-          git commit -m "chore(data): update Starlink GP snapshot ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+          git add public/data/starlink.json public/data/active.json
+          git commit -m "chore(data): update Starlink & Active GP snapshots ($(date -u +'%Y-%m-%d %H:%M UTC'))"
           git push origin HEAD:main

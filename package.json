@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "update-starlink": "curl -L -A \"Mozilla/5.0\" \"https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json\" -o public/data/starlink.json"
+    "update-starlink": "curl -L -A \"Mozilla/5.0\" \"https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=json\" -o public/data/starlink.json",
+    "update-active": "curl -L -A \"Mozilla/5.0\" \"https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json\" -o public/data/active.json",
+    "update-snapshots": "npm run update-starlink && npm run update-active"
   },
   "dependencies": {
     "@react-three/drei": "^9.120.4",

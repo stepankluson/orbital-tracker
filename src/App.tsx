@@ -342,10 +342,27 @@ export function App() {
 
   const groupCounts = useMemo(() => {
     const counts: Partial<Record<SatelliteGroupId, number>> = {};
+    const dedicatedIds = new Set<number>();
+
     for (const group of SATELLITE_GROUPS) {
       const list = loadedByGroup[group.id];
-      if (list) {
+      if (!list) {
+        continue;
+      }
+      if (group.id !== 'active') {
         counts[group.id] = list.length;
+        for (let i = 0; i < list.length; i++) {
+          dedicatedIds.add(list[i].id);
+        }
+      } else {
+        // Count only satellites not already present in dedicated layers (stations/visual/starlink/gnss/weather)
+        let uniqueCount = 0;
+        for (let i = 0; i < list.length; i++) {
+          if (!dedicatedIds.has(list[i].id)) {
+            uniqueCount++;
+          }
+        }
+        counts.active = uniqueCount;
       }
     }
     return counts;

@@ -68,6 +68,7 @@ const CATEGORY_COLOR_HEX: Readonly<Record<SatelliteCategory, string>> =
       starlink: '#e0f2fe',
       gnss: '#f59e0b',
       weather: '#a855f7',
+      active: '#2dd4bf',
       fallback: '#38bdf8',
     },
   );

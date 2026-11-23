@@ -22,7 +22,7 @@ interface SatelliteSwarmProps {
   readonly onSelect: (id: number) => void;
 }
 
-const MAX_INSTANCES = 16_000;
+const MAX_INSTANCES = 24_000;
 const DENSE_THRESHOLD = 500;
 const STAGGER_THRESHOLD = 1_000;
 const STAGGER_BATCH_SIZE = 1_800;
@@ -55,6 +55,7 @@ const CATEGORY_COLORS: Readonly<Record<SatelliteCategory, CategoryColorPair>> =
       starlink: DEFAULT_COLOR_PAIR,
       gnss: DEFAULT_COLOR_PAIR,
       weather: DEFAULT_COLOR_PAIR,
+      active: DEFAULT_COLOR_PAIR,
       fallback: DEFAULT_COLOR_PAIR,
     },
   );

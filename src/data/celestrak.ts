@@ -10,6 +10,7 @@ import {
 const CELESTRAK_BASE_URL = 'https://celestrak.org/NORAD/elements/gp.php';
 const LOCAL_SNAPSHOT_URLS: Readonly<Partial<Record<SatelliteGroupId, string>>> = {
   starlink: '/data/starlink.json',
+  active: '/data/active.json',
 };
 const IDB_NAME = 'orbital_celestrak_cache_v1';
 const IDB_STORE = 'groups';
@@ -64,6 +65,13 @@ export const SATELLITE_GROUPS: readonly SatelliteGroupConfig[] = [
     label: 'Weather Satellites',
     colorHex: '#a855f7',
     shadowColorHex: '#4c2f6b',
+    defaultEnabled: false,
+  },
+  {
+    id: 'active',
+    label: 'Other Active',
+    colorHex: '#2dd4bf',
+    shadowColorHex: '#1e5252',
     defaultEnabled: false,
   },
 ];
@@ -346,7 +354,15 @@ function parseGroupRecords(
 ): SatelliteRecord[] {
   const parsed: SatelliteRecord[] = [];
   for (let i = 0; i < records.length; i++) {
-    const sat = parseOmmToRecord(records[i], groupId);
+    const omm = records[i];
+    // Exclude Starlink objects from "Other Active" so they remain isolated in the Starlink layer
+    if (
+      groupId === 'active' &&
+      omm.OBJECT_NAME.trim().toUpperCase().startsWith('STARLINK')
+    ) {
+      continue;
+    }
+    const sat = parseOmmToRecord(omm, groupId);
     if (sat) {
       parsed.push(sat);
     }

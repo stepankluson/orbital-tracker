@@ -15,5 +15,6 @@ Thumbs.db
 *.log
 *.local
 
-# Ensure Starlink snapshot stays tracked
+# Ensure local GP snapshots stay tracked
 !public/data/starlink.json
+!public/data/active.json
