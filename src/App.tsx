@@ -92,7 +92,10 @@ function SimulationDriver({
   const prevLockedPosRef = useRef<THREE.Vector3 | null>(null);
   const desiredPos = useMemo(() => new THREE.Vector3(), []);
   const targetVec = useMemo(() => new THREE.Vector3(), []);
-  const deltaVec = useMemo(() => new THREE.Vector3(), []);
+  const prevDir = useMemo(() => new THREE.Vector3(), []);
+  const currDir = useMemo(() => new THREE.Vector3(), []);
+  const offsetVec = useMemo(() => new THREE.Vector3(), []);
+  const radialQuat = useMemo(() => new THREE.Quaternion(), []);
 
   useFrame((_, delta) => {
     const clampedDelta = Math.min(delta, 0.1);
@@ -123,7 +126,7 @@ function SimulationDriver({
 
     const controls = controlsRef.current;
 
-    // Camera Lock: follow selected satellite while allowing free orbit/zoom around it
+    // Camera Lock: orbit with the selected satellite in its local radial frame
     if (isCameraLocked && selectedSatellite && controls) {
       const gmst = computeGmst(simDate);
       const satPos = propagateToScenePosition(
@@ -139,19 +142,37 @@ function SimulationDriver({
           prevLockedPosRef.current === null ||
           prevLockedIdRef.current !== selectedSatellite.id
         ) {
+          // Place camera outside the satellite along its radial vector with a slight tangential offset
+          // so Earth sits cleanly in the background and never occludes the spacecraft
+          const r = targetVec.length() || 1;
+          const n: SceneVec3 = {
+            x: targetVec.x / r,
+            y: targetVec.y / r,
+            z: targetVec.z / r,
+          };
+          const { t1 } = computeTangentBasis(n);
+          camera.position.set(
+            targetVec.x + n.x * 0.42 + t1.x * 0.22,
+            targetVec.y + n.y * 0.42 + t1.y * 0.22,
+            targetVec.z + n.z * 0.42 + t1.z * 0.22,
+          );
+          controls.target.copy(targetVec);
           prevLockedPosRef.current = targetVec.clone();
           prevLockedIdRef.current = selectedSatellite.id;
         } else {
-          // Translate camera & target by the satellite's frame-to-frame motion delta
-          deltaVec.subVectors(targetVec, prevLockedPosRef.current);
-          camera.position.add(deltaVec);
-          controls.target.add(deltaVec);
+          // Rotate the camera's offset vector by the satellite's radial rotation quaternion
+          prevDir.copy(prevLockedPosRef.current).normalize();
+          currDir.copy(targetVec).normalize();
+          radialQuat.setFromUnitVectors(prevDir, currDir);
+
+          offsetVec.subVectors(camera.position, prevLockedPosRef.current);
+          offsetVec.applyQuaternion(radialQuat);
+
+          camera.position.copy(targetVec).add(offsetVec);
+          controls.target.copy(targetVec);
           prevLockedPosRef.current.copy(targetVec);
         }
 
-        // Smoothly damp OrbitControls target onto the satellite position
-        const lerpAlpha = 1 - Math.exp(-8 * clampedDelta);
-        controls.target.lerp(targetVec, lerpAlpha);
         controls.update();
       }
       focusTargetRef.current = null;
