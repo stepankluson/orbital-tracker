@@ -19,9 +19,9 @@ interface SatelliteFootprintProps {
 
 const ANGULAR_SEGMENTS = 72;
 const RADIAL_RINGS = 8;
-const FOOTPRINT_OUTLINE_RADIUS = 1.003;
-const FOOTPRINT_FILL_RADIUS = 1.0025;
-const SURFACE_MARKER_RADIUS = 1.0035;
+const FOOTPRINT_OUTLINE_RADIUS = 1.0055;
+const FOOTPRINT_FILL_RADIUS = 1.005;
+const SURFACE_MARKER_RADIUS = 1.006;
 
 export function SatelliteFootprint({
   satellite,
@@ -188,7 +188,7 @@ export function SatelliteFootprint({
       );
     }
 
-    // 3. Update curved horizon footprint outline at radius = 1.003
+    // 3. Update curved horizon footprint outline at radius = 1.0055
     const outlineAttr = outlineLine.geometry.getAttribute(
       'position',
     ) as THREE.BufferAttribute;
@@ -212,7 +212,7 @@ export function SatelliteFootprint({
     }
     outlineAttr.needsUpdate = true;
 
-    // 4. Update curved spherical-cap fill at radius = 1.0025
+    // 4. Update curved spherical-cap fill at radius = 1.005
     const fillAttr = fillGeometry.getAttribute(
       'position',
     ) as THREE.BufferAttribute;
@@ -269,6 +269,9 @@ export function SatelliteFootprint({
           transparent
           opacity={0.11}
           depthWrite={false}
+          polygonOffset={true}
+          polygonOffsetFactor={-1}
+          polygonOffsetUnits={-1}
           side={THREE.DoubleSide}
           toneMapped={false}
         />
